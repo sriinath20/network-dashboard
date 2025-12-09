@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Activity, 
   ArrowDown, 
   ArrowUp, 
   Globe, 
-  Server, 
   MapPin,
   RefreshCw,
   Zap,
@@ -12,7 +11,6 @@ import {
   Cpu,
   Battery,
   Smartphone,
-  WifiOff,
   Download,
   Moon,
   Sun,
@@ -96,7 +94,6 @@ const App = () => {
   );
 
   const connection = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-  const isOnline = navigator.onLine;
 
   // --- Effects ---
 
