@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { 
-  Wifi, 
   Activity, 
   ArrowDown, 
   ArrowUp, 
@@ -14,8 +13,6 @@ import {
   Signal
 } from 'lucide-react';
 import { 
-  LineChart, 
-  Line, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -25,8 +22,7 @@ import {
   Area 
 } from 'recharts';
 
-const NetworkDashboard = () => {
-  const [loading, setLoading] = useState(true);
+const App = () => {
   const [testing, setTesting] = useState(false);
   const [networkInfo, setNetworkInfo] = useState({
     ip: 'Loading...',
@@ -106,8 +102,6 @@ const NetworkDashboard = () => {
     } catch (error) {
       console.error("Failed to fetch IP info", error);
       setNetworkInfo(prev => ({ ...prev, isp: 'Unknown (Adblocker?)' }));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -127,10 +121,6 @@ const NetworkDashboard = () => {
     const jitter = Math.max(...pings) - Math.min(...pings);
 
     // 2. Download Simulation (Estimating bandwidth)
-    // We fetch a random image multiple times and measure throughput
-    let totalBytes = 0;
-    const startTime = performance.now();
-    const duration = 2000; // 2 seconds test
     
     // Simulate signal strength based on connection API or ping
     let signal = 100;
@@ -422,4 +412,4 @@ const NetworkDashboard = () => {
   );
 };
 
-export default NetworkDashboard;
+export default App;
