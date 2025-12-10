@@ -212,16 +212,15 @@ const App = () => {
     return type.toUpperCase();
   };
 
-  // --- STATISTICALLY ACCURATE Speed Test Logic ---
+  // --- STATISTICALLY ACCURATE Speed Test Logic (Time-Based) ---
   const runSpeedTest = async () => {
     if (testing) return;
     setTesting(true);
     setProgress(0);
-    // Reset metrics to 0 to prevent previous test values from lingering
     setMetrics(prev => ({ ...prev, download: 0, upload: 0, ping: 0, jitter: 0 }));
     addLog('info', 'Starting Precision Diagnostics...');
 
-    // 1. Latency
+    // 1. Latency (Ping)
     const pings = [];
     for(let i=0; i<10; i++) {
         const start = performance.now();
@@ -234,56 +233,60 @@ const App = () => {
     
     setMetrics(prev => ({ ...prev, ping: avgPing, jitter }));
 
-    // 2. Download Test (Windowed Sampling)
-    // We measure multiple discrete batches and filter outliers to avoid "Max Value" bias.
-    const imageAddr = "https://images.unsplash.com/photo-1481349518771-20055b2a7b24?q=80&w=2000&auto=format&fit=crop"; 
-    // Approx 2.2MB per image (Conservative estimate to avoid over-reporting)
-    const singleFileSize = 2200000 * 8; 
-    const batches = 5; 
+    // 2. Download Test (Time-Based Loop)
+    // We use a known 5MB file from Wikimedia which supports CORS.
+    // This allows us to use .blob() to ensure the file is FULLY downloaded.
+    const fileUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2d/Snake_River_%285mb%29.jpg"; 
+    const fileSizeBits = 5242880 * 8; // 5MB in bits
+    const streams = 6; // 6 parallel streams to saturate 5G
+    const durationLimit = 6000; // Run for 6 seconds min
+    
     const samples: number[] = [];
+    const testStart = performance.now();
+    let totalBitsLoaded = 0;
 
     try {
-        // A. Warmup Batch (Discard result) - Wakes up the connection
-        await Promise.all([1, 2].map(() => fetch(imageAddr + "&warmup=" + Date.now() + Math.random(), { mode: 'no-cors' })));
-
-        // B. Measurement Batches
-        for (let b = 0; b < batches; b++) {
+        // Run loop until durationLimit is reached
+        while ((performance.now() - testStart) < durationLimit) {
+            
             const batchStart = performance.now();
             
-            // Run 4 parallel requests with strict cache busting
-            const promises = [1, 2, 3, 4].map((i) => 
-                fetch(`${imageAddr}&batch=${b}&req=${i}&t=${Date.now()}`, { mode: 'no-cors' })
-            );
+            // Run parallel requests
+            const promises = Array.from({ length: streams }).map(async () => {
+                const r = await fetch(`${fileUrl}?t=${Date.now()}_${Math.random()}`);
+                await r.blob(); // Force full download
+            });
+            
             await Promise.all(promises);
             
             const batchEnd = performance.now();
-            const durationSeconds = (batchEnd - batchStart) / 1000;
-            const totalBits = singleFileSize * 4;
-            const speedMbps = (totalBits / durationSeconds) / 1024 / 1024;
+            const durationSec = (batchEnd - batchStart) / 1000;
+            const batchBits = fileSizeBits * streams;
+            const speedMbps = (batchBits / durationSec) / 1024 / 1024;
             
-            // Prevent unrealistic spikes (e.g. from cache hits)
-            if (speedMbps < 2000) {
-               samples.push(speedMbps);
-            }
+            samples.push(speedMbps);
+            totalBitsLoaded += batchBits;
 
-            // Show moving average in UI while testing
+            // Update UI with moving average
             const currentAvg = Math.round(samples.reduce((a, b) => a + b) / samples.length);
             setMetrics(prev => ({ ...prev, download: currentAvg }));
-            setProgress(prev => prev + (60 / batches));
+            
+            const elapsedTime = performance.now() - testStart;
+            const progressPct = Math.min(20 + (elapsedTime / durationLimit) * 60, 80);
+            setProgress(progressPct);
         }
 
-        // C. Statistical Processing (Remove Outliers)
-        // Sort samples: Low -> High
+        // Calculate Final Speed (Median to remove outliers)
         samples.sort((a, b) => a - b);
+        let finalSpeedMbps = 0;
         
-        let validSamples = samples;
-        if (samples.length >= 3) {
-            // Remove the lowest (often slow start) and highest (often burst) to get true sustained speed
-            validSamples = samples.slice(1, -1);
+        if (samples.length > 2) {
+             // Remove top/bottom outliers
+             const validSamples = samples.slice(1, -1);
+             finalSpeedMbps = Math.round(validSamples.reduce((a, b) => a + b) / validSamples.length);
+        } else {
+             finalSpeedMbps = Math.round(samples.reduce((a, b) => a + b) / samples.length);
         }
-
-        const finalSpeedAvg = validSamples.reduce((a, b) => a + b) / validSamples.length;
-        const finalSpeedMbps = Math.round(finalSpeedAvg);
 
         setMetrics(prev => ({ ...prev, download: finalSpeedMbps }));
         
@@ -325,7 +328,8 @@ const App = () => {
         }, 500);
 
     } catch (e) {
-        addLog('error', 'Speed test failed (Network Error)');
+        console.error(e);
+        addLog('error', 'Speed test failed (CORS/Network Error)');
         setTesting(false);
     }
   };
@@ -364,7 +368,7 @@ const App = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-500">
-              NetDash <span className={textMuted + " font-normal text-sm"}>v3.4.0</span>
+              NetDash <span className={textMuted + " font-normal text-sm"}>v3.5.0</span>
             </h1>
             <p className={`${textMuted} text-xs`}>Advanced Network Telemetry</p>
           </div>
@@ -573,7 +577,7 @@ const App = () => {
                         )}
                         <p className={`mt-4 text-xs ${textMuted} flex items-center justify-center gap-1`}>
                             <Info className="w-3 h-3" /> 
-                            Running 5 sample batches with outlier removal.
+                            Tests run for 6 seconds with 6 parallel streams to saturate 5G bandwidth.
                         </p>
                     </div>
 
