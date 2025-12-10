@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Activity, 
   ArrowDown, 
@@ -16,7 +16,8 @@ import {
   Phone,
   FileText,
   LayoutDashboard,
-  Gauge
+  Gauge,
+  Info
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -94,12 +95,10 @@ const App = () => {
 
   // --- Effects ---
 
-  // 1. Initial Load & Listeners
   useEffect(() => {
     fetchNetworkInfo();
     loadHistory();
     
-    // Uptime Monitoring
     const handleOnline = () => addLog('success', 'Connection Restored');
     const handleOffline = () => addLog('error', 'Connection Lost');
     
@@ -112,7 +111,6 @@ const App = () => {
     };
   }, []);
 
-  // 2. Traffic Graph Loop
   useEffect(() => {
     const interval = setInterval(updateTrafficGraph, 1000);
     return () => clearInterval(interval);
@@ -139,7 +137,7 @@ const App = () => {
       ping: newMetrics.ping,
       isp: networkInfo.isp
     };
-    const updated = [newEntry, ...history].slice(0, 10); // Keep last 10
+    const updated = [newEntry, ...history].slice(0, 10);
     setHistory(updated);
     localStorage.setItem('netdash_history', JSON.stringify(updated));
   };
@@ -161,8 +159,8 @@ const App = () => {
   const updateTrafficGraph = () => {
     setTrafficData(prev => {
       const newTime = prev[prev.length - 1].time + 1;
-      // Traffic correlates with download speed during test
-      const baseRecv = testing ? metrics.download * 0.125 : Math.random() * 0.5; // Mb/s to MB/s approx
+      
+      const baseRecv = testing ? metrics.download * 0.125 : Math.random() * 0.5;
       const baseSent = testing ? metrics.upload * 0.125 : Math.random() * 0.1;
 
       const newRx = parseFloat((baseRecv + Math.random() * 0.5).toFixed(2));
@@ -201,59 +199,83 @@ const App = () => {
     }
   };
 
-  // --- Real Speed Test Logic ---
+  // Helper to get a cleaner signal type
+  const getSignalType = () => {
+    if (!connection) return 'WiFi / Ethernet';
+    
+    // Most browsers hide the real type and stick to '4g'
+    const type = connection.effectiveType; // 'slow-2g', '2g', '3g', or '4g'
+    const rtt = connection.rtt; // Round Trip Time estimation
+
+    if (type === '4g') {
+        // Heuristic: If latency is super low, it's likely wired
+        if (rtt < 10) return 'Ethernet / Fiber';
+        return 'Broadband / 5G / WiFi';
+    }
+    return type.toUpperCase();
+  };
+
+  // --- IMPROVED Speed Test Logic ---
   const runSpeedTest = async () => {
     if (testing) return;
     setTesting(true);
     setProgress(0);
-    addLog('info', 'Starting Diagnostics...');
+    addLog('info', 'Starting Advanced Diagnostics...');
 
-    // 1. Latency (Real) - Increased samples to 10
+    // 1. Latency
     const pings = [];
     for(let i=0; i<10; i++) {
         const start = performance.now();
         await fetch('https://www.google.com/favicon.ico?' + Math.random(), { mode: 'no-cors' });
         pings.push(performance.now() - start);
-        setProgress(10 + (i*2));
+        setProgress(5 + (i));
     }
     const avgPing = Math.round(pings.reduce((a, b) => a + b) / pings.length);
     const jitter = Math.round(Math.max(...pings) - Math.min(...pings));
     
     setMetrics(prev => ({ ...prev, ping: avgPing, jitter }));
 
-    // 2. Download Test (Real-ish)
+    // 2. Parallel Download Test (To saturate bandwidth)
+    // We run 4 simultaneous requests to get a better max speed reading
     const imageAddr = "https://images.unsplash.com/photo-1481349518771-20055b2a7b24?q=80&w=2000&auto=format&fit=crop"; 
-    const downloadSize = 5000000; // Approx 5MB
-    const startTime = performance.now();
+    const singleFileSize = 4500000 * 8; // ~4.5MB in bits
+    const batches = 3; // Run 3 batches of 4 downloads
     
+    let totalBitsLoaded = 0;
+    const startTime = performance.now();
+
     try {
-        await fetch(imageAddr + "&cache=" + Math.random(), { mode: 'no-cors' });
+        for (let b = 0; b < batches; b++) {
+            // Run 4 requests in parallel
+            const promises = [1, 2, 3, 4].map(() => 
+                fetch(imageAddr + "&cache=" + Math.random() + b, { mode: 'no-cors' })
+            );
+            await Promise.all(promises);
+            totalBitsLoaded += (singleFileSize * 4);
+            
+            // Update progress/speed mid-test
+            const midTime = performance.now();
+            const duration = (midTime - startTime) / 1000;
+            const currentSpeed = Math.round((totalBitsLoaded / duration) / 1024 / 1024);
+            setMetrics(prev => ({ ...prev, download: currentSpeed }));
+            setProgress(prev => prev + 20);
+        }
+
         const endTime = performance.now();
         const durationSeconds = (endTime - startTime) / 1000;
-        const bitsLoaded = downloadSize * 8;
-        const speedBps = bitsLoaded / durationSeconds;
-        const speedMbps = Math.round(speedBps / 1024 / 1024);
+        const finalSpeedBps = totalBitsLoaded / durationSeconds;
+        const finalSpeedMbps = Math.round(finalSpeedBps / 1024 / 1024);
+
+        setMetrics(prev => ({ ...prev, download: finalSpeedMbps }));
         
-        // Artificial delay to allow user to see the "Testing" phase longer
-        let current = 0;
-        const step = speedMbps / 40; // Slower increments
-        const ramp = setInterval(() => {
-            current += step;
-            if (current >= speedMbps) {
-                clearInterval(ramp);
-                setMetrics(prev => ({ ...prev, download: speedMbps }));
-            } else {
-                setMetrics(prev => ({ ...prev, download: Math.round(current) }));
-            }
-            setProgress(prev => Math.min(prev + 1, 60));
-        }, 100);
-        
-        // 3. Upload (Simulated based on Download)
-        // Increased wait time to 4000ms (4 seconds)
+        // 3. Upload (Simulated)
+        // Note: Real upload tests require a backend server.
         setTimeout(() => {
-            const simulatedUpload = Math.round(speedMbps * (connection?.type === 'cellular' ? 0.1 : 0.3));
+            // Estimate upload based on connection profile
+            // Fiber usually has symmetrical (1:1), Cable/5G usually 10:1
+            const ratio = (connection?.rtt < 15) ? 0.8 : 0.2; 
+            const simulatedUpload = Math.round(finalSpeedMbps * ratio);
             
-            // Animate Upload
             let upCurrent = 0;
             const upStep = simulatedUpload / 20;
             const upRamp = setInterval(() => {
@@ -264,16 +286,16 @@ const App = () => {
                 } else {
                     setMetrics(prev => ({ ...prev, upload: Math.round(upCurrent) }));
                 }
-                setProgress(prev => Math.min(prev + 2, 95));
+                setProgress(prev => Math.min(prev + 1, 100));
             }, 100);
 
-            // Finish
             setTimeout(() => {
-                setProgress(100);
+                clearInterval(upRamp);
                 setTesting(false);
+                setProgress(100);
                 
                 const finalResults = {
-                    download: speedMbps,
+                    download: finalSpeedMbps,
                     upload: simulatedUpload,
                     ping: avgPing,
                     jitter: jitter,
@@ -281,10 +303,10 @@ const App = () => {
                 };
                 setMetrics(prev => ({ ...prev, ...finalResults }));
                 saveResult(finalResults);
-                addLog('success', `Test Complete: ${speedMbps} Mbps`);
-            }, 3000);
+                addLog('success', `Test Complete: ${finalSpeedMbps} Mbps`);
+            }, 2500);
 
-        }, 4000);
+        }, 500);
 
     } catch (e) {
         addLog('error', 'Speed test failed (Network Error)');
@@ -326,7 +348,7 @@ const App = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-500">
-              NetDash <span className={textMuted + " font-normal text-sm"}>v3.1.0</span>
+              NetDash <span className={textMuted + " font-normal text-sm"}>v3.2.0</span>
             </h1>
             <p className={`${textMuted} text-xs`}>Advanced Network Telemetry</p>
           </div>
@@ -480,7 +502,7 @@ const App = () => {
                                 <div>
                                 <p className={`text-xs ${textMuted}`}>Signal Type</p>
                                 <p className={`text-sm font-medium ${textHighlight}`}>
-                                    {connection ? (connection.effectiveType === '4g' ? '4G+ / 5G / Fiber' : connection.effectiveType.toUpperCase()) : 'WiFi / Ethernet'}
+                                    {getSignalType()}
                                 </p>
                                 </div>
                             </div>
@@ -533,6 +555,10 @@ const App = () => {
                                 />
                             </div>
                         )}
+                        <p className={`mt-4 text-xs ${textMuted} flex items-center justify-center gap-1`}>
+                            <Info className="w-3 h-3" /> 
+                            Running 4 parallel streams. Upload speed is estimated.
+                        </p>
                     </div>
 
                     {/* Quick Stats Row */}
@@ -565,7 +591,7 @@ const App = () => {
                         </div>
                         <div className={`flex items-center gap-2 ${textMuted} mb-2`}>
                             <ArrowUp className="w-4 h-4" />
-                            <span className="text-sm font-semibold uppercase tracking-wider">Upload</span>
+                            <span className="text-sm font-semibold uppercase tracking-wider">Upload <span className="text-[10px] opacity-70">(Est)</span></span>
                         </div>
                         <div className="flex items-baseline gap-2">
                             <span className={`text-4xl font-bold ${textHighlight}`}>{metrics.upload}</span>
