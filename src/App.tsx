@@ -216,13 +216,15 @@ const App = () => {
     if (testing) return;
     setTesting(true);
     setProgress(0);
+    // Reset metrics to 0 to prevent previous test values from lingering
+    setMetrics(prev => ({ ...prev, download: 0, upload: 0, ping: 0, jitter: 0 }));
     addLog('info', 'Starting Precision Diagnostics...');
 
     // 1. Latency
     const pings = [];
     for(let i=0; i<10; i++) {
         const start = performance.now();
-        await fetch('https://www.google.com/favicon.ico?' + Math.random(), { mode: 'no-cors' });
+        await fetch('https://www.google.com/favicon.ico?' + Date.now() + Math.random(), { mode: 'no-cors' });
         pings.push(performance.now() - start);
         setProgress(5 + (i));
     }
@@ -234,21 +236,22 @@ const App = () => {
     // 2. Download Test (Windowed Sampling)
     // We measure multiple discrete batches and filter outliers to avoid "Max Value" bias.
     const imageAddr = "https://images.unsplash.com/photo-1481349518771-20055b2a7b24?q=80&w=2000&auto=format&fit=crop"; 
-    const singleFileSize = 4500000 * 8; // ~4.5MB in bits
-    const batches = 5; // Run 5 batches to get enough data for statistical filtering
+    // Approx 2.2MB per image (Conservative estimate to avoid over-reporting)
+    const singleFileSize = 2200000 * 8; 
+    const batches = 5; 
     const samples: number[] = [];
 
     try {
         // A. Warmup Batch (Discard result) - Wakes up the connection
-        await Promise.all([1, 2].map(() => fetch(imageAddr + "&cache=" + Math.random(), { mode: 'no-cors' })));
+        await Promise.all([1, 2].map(() => fetch(imageAddr + "&warmup=" + Date.now() + Math.random(), { mode: 'no-cors' })));
 
         // B. Measurement Batches
         for (let b = 0; b < batches; b++) {
             const batchStart = performance.now();
             
-            // Run 4 parallel requests
-            const promises = [1, 2, 3, 4].map(() => 
-                fetch(imageAddr + "&cache=" + Math.random() + b, { mode: 'no-cors' })
+            // Run 4 parallel requests with strict cache busting
+            const promises = [1, 2, 3, 4].map((i) => 
+                fetch(`${imageAddr}&batch=${b}&req=${i}&t=${Date.now()}`, { mode: 'no-cors' })
             );
             await Promise.all(promises);
             
@@ -257,7 +260,10 @@ const App = () => {
             const totalBits = singleFileSize * 4;
             const speedMbps = (totalBits / durationSeconds) / 1024 / 1024;
             
-            samples.push(speedMbps);
+            // Prevent unrealistic spikes (e.g. from cache hits)
+            if (speedMbps < 2000) {
+               samples.push(speedMbps);
+            }
 
             // Show moving average in UI while testing
             const currentAvg = Math.round(samples.reduce((a, b) => a + b) / samples.length);
@@ -357,7 +363,7 @@ const App = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-500">
-              NetDash <span className={textMuted + " font-normal text-sm"}>v3.3.0</span>
+              NetDash <span className={textMuted + " font-normal text-sm"}>v3.4.0</span>
             </h1>
             <p className={`${textMuted} text-xs`}>Advanced Network Telemetry</p>
           </div>
