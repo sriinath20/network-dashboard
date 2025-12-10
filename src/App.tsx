@@ -17,7 +17,8 @@ import {
   FileText,
   LayoutDashboard,
   Gauge,
-  Info
+  Info,
+  Sparkles
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -354,9 +355,9 @@ const App = () => {
   const textHighlight = darkMode ? "text-slate-200" : "text-slate-800";
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 font-mono ${themeClasses} p-4 md:p-8`}>
+    <div className={`min-h-screen transition-colors duration-300 font-mono ${themeClasses} p-4 md:p-8 flex flex-col`}>
       {/* Header */}
-      <div className={`max-w-7xl mx-auto mb-6 flex flex-col md:flex-row justify-between items-center gap-4 border-b ${darkMode ? 'border-slate-800' : 'border-slate-200'} pb-6`}>
+      <div className={`max-w-7xl mx-auto w-full mb-6 flex flex-col md:flex-row justify-between items-center gap-4 border-b ${darkMode ? 'border-slate-800' : 'border-slate-200'} pb-6`}>
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
             <Activity className="w-6 h-6 text-white" />
@@ -392,7 +393,7 @@ const App = () => {
         </button>
       </div>
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-7xl mx-auto w-full flex-grow">
         
         {/* === MONITOR TAB === */}
         {activeTab === 'monitor' && (
@@ -698,6 +699,14 @@ const App = () => {
         )}
 
       </div>
+      
+      {/* Footer */}
+      <div className={`mt-8 py-6 text-center border-t ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+        <p className={`text-xs ${textMuted} flex items-center justify-center gap-2`}>
+          Made with Gemini <Sparkles className="w-3 h-3 text-indigo-400" />
+        </p>
+      </div>
+
     </div>
   );
 };
