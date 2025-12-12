@@ -577,7 +577,7 @@ const App = () => {
                         )}
                         <p className={`mt-4 text-xs ${textMuted} flex items-center justify-center gap-1`}>
                             <Info className="w-3 h-3" /> 
-                            Tests run for 6 seconds with 6 parallel streams to saturate 5G bandwidth.
+                            Tests run for 6 seconds.
                         </p>
                     </div>
 
